@@ -1,0 +1,33 @@
+---
+
+variables:
+  CONDITION: Tei
+
+stages:
+  - test
+
+Test:When:
+  stage: test
+  script: echo "This is When"
+  when: manual
+  # on_success (default): Run the job only when all jobs in earlier stages succeed or have allow_failure: true.
+  # manual: Run the job only when triggered manually.
+  # always: Run the job regardless of the status of jobs in earlier stages. Can also be used in workflow:rules.
+  # on_failure: Run the job only when at least one job in an earlier stage fails.
+  # delayed: Delay the execution of a job for a specified duration.
+  # never: Don’t run the job. Can only be used in a rules section or workflow: rules.
+
+Test:Rules:
+  stage: test
+  script: echo "This is Rules"
+  rules:
+    - if: '$CONDITION'
+    - when: manual
+
+Test:Change:
+  stage: test
+  script: echo "This is Change"
+  rules:
+    - changes:
+        - ".gitlab-ci.yml"
+        - "*.xml"

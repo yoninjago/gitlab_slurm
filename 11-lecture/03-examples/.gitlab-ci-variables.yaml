@@ -1,0 +1,18 @@
+---
+stages:
+  - echo
+
+Echo:GitLab env:
+  stage: echo
+  script: env | grep "CI_"
+
+Echo:GitLab variables:
+  stage: echo
+  script:
+    - echo ${VARIABLE}
+    - echo ${VARIABLE_MASKED}
+    - echo ${VARIABLE_PROTECTED}
+
+Echo:GitLab file variables:
+  stage: echo
+  script: cat ${VARIABLE_FILE}

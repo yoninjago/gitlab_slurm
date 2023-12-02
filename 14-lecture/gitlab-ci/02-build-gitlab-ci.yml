@@ -1,0 +1,149 @@
+---
+
+workflow:
+  rules:
+    # For merge requests created to `develop` branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+      variables:
+        IMAGE_TAG: 'dev-pr-${CI_MERGE_REQUEST_IID}'
+    # For merge requests created to `main` branch from `develop` branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "develop"'
+      variables:
+        IMAGE_TAG: 'main-pr-${CI_MERGE_REQUEST_IID}'
+    # For `main` and `develop` branch, create a pipeline (this includes on schedules, pushes, merges, etc.).
+    - if: '$CI_COMMIT_BRANCH =~ /^main|develop$/'
+      variables:
+        IMAGE_TAG: '${CI_COMMIT_BRANCH}-${CI_PIPELINE_IID}'
+    # For tags starting with v prefix, create a pipeline
+    - if: '$CI_COMMIT_TAG =~ /^v$/'
+      variables:
+        IMAGE_TAG: '${CI_COMMIT_TAG}'
+    # For manual runs, create a pipeline
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      variables:
+        IMAGE_TAG: 'manual-${CI_COMMIT_BRANCH}-${CI_PIPELINE_IID}'
+
+image: python:3.9
+stages:
+  - lint
+  - build
+  - test
+  - deploy
+  - validate
+  - release
+
+.lint:
+  stage: lint
+  before_script: &installDev
+    - source venv/bin/activate || (python3 -m venv venv && source venv/bin/activate)
+    - pip3 install --upgrade -r requirements-dev.txt
+  cache: &cache
+    - key: python
+      paths:
+        - venv/
+  rules:
+    # We run lints for MRs only
+    - if: '$CI_MERGE_REQUEST_IID'
+
+Lint:Pylint:
+  extends: .lint
+  script: find {tests,application} -type f -name "*.py" | xargs pylint
+
+Lint:Black:
+  extends: .lint
+  script: black {tests,application}/**/*.py -v --check --diff
+
+Build:Docker:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context "${CI_PROJECT_DIR}" --destination "${CI_REGISTRY_IMAGE}:${IMAGE_TAG}"
+
+.test:
+  stage: test
+  before_script: *installDev
+  cache: *cache
+
+Test:Unit:
+  extends: .test
+  script: echo "Unit tests"
+  rules: &develop
+    # We run unit tests for MRs created against the develop branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    # And for develop branch
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+Test:Integration:
+  extends: .test
+  script: echo "Unit tests"
+  rules: &main
+    # We run unit tests for MRs created against the main branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    # And for main branch
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Test:SecurityBasic:
+  stage: test
+  script: echo "Some basic security checks"
+  rules: *develop
+
+Test:SecurityAdvanced:
+  stage: test
+  script: echo "Some advanced security checks"
+  rules: *main
+
+Deploy:Dev:
+  stage: deploy
+  environment:
+    name: development
+    url: https://dev.example.com
+  script: echo "deploy to ${CI_ENVIRONMENT_NAME}"
+  rules:
+    # We deploy dev env from develop branch only
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+Deploy:Staging:
+  stage: deploy
+  environment:
+    name: staging
+    url: https://staging.example.com
+  script: echo "deploy to ${CI_ENVIRONMENT_NAME}"
+  rules:
+    # We deploy staging env from main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Deploy:Production:
+  stage: deploy
+  environment:
+    name: production
+    url: https://example.com
+  script: echo "deploy to ${CI_ENVIRONMENT_NAME}"
+  rules:
+    # We deploy prod env from tags only
+    - if: '$CI_COMMIT_TAG'
+      when: manual
+
+Validate:Smoke:
+  stage: validate
+  script: echo "e2e tests"
+  rules:
+    # We run smoke tests after deployments
+    - if: '$CI_COMMIT_BRANCH =~ /^main|develop$/'
+
+Validate:E2E:
+  stage: validate
+  script: echo "e2e tests"
+  rules:
+    # We run e2e tests for main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Release:Tag:
+  stage: release
+  script: echo "release"
+  rules:
+    # We run release creation from main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'

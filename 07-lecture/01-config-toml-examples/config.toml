@@ -1,0 +1,100 @@
+concurrent = 32
+
+# Такое использовалось в проде
+[[runners]]
+  executor = "kubernetes"
+  name = "Kubernetes Runner"
+  # Во многих компаниях во внутренних ресурсах используются
+  # собственные корневые сертификаты. Чтобы раннер доверял
+  # подлинности сервера гитлаба, добавлялась такая строчка.
+  tls-ca-file = "/usr/local/share/ca-certificates/RootCA.crt"
+  token = "${RUNNER_TOKEN_0}"
+  url = "https://gitlab.company.ru/"
+
+  # Блок про кэш можно переиспользовать в конфигурации любого
+  # раннера, а не только kubernetes
+  [runners.cache]
+    Path = ""
+    Shared = true
+    Type = "s3"
+    [runners.cache.s3]
+      AccessKey = "${S3_ACCESS_KEY}"
+      BucketLocation = "default-store"
+      BucketName = "runners-cache"
+      Insecure = false
+      SecretKey = "${S3_SECRET_KEY}"
+      ServerAddress = "s3.company.ru:443"
+
+  [runners.kubernetes]
+    # Иногда возникает необходимость пересобрать helper_image, в частности,
+    # когда используется s3 для кэша и артифактов, а сертификаты
+    # самоподписанные. В пересобранном helper добавляются корпоративные
+    # сертификаты.
+    helper_image = "registry.company.ru/devops/gitlab-runner/helper:latest"
+    image = "registry.company.ru/shared/bash-utils:latest"
+    namespace = "runners"
+    # privileged = true нужен для docker-in-docker. Но лучше ограничить такой
+    # раннер несколькими репозиториями, которые собирают образ kaniko, а всем
+    # остальным предоставлять непривилегированный раннер.
+    privileged = true
+    [runners.kubernetes.node_selector]
+      # Профиль нагрузки на сервер выполняющий сборки существенно отличается
+      # от профиля нагрузки от пользовательских приложений. Если раннеры
+      # запускаются в том же кластере, где работают пользовательские
+      # приложения, их можно изолировать друг от друга подобным способом.
+      ci = "true"
+    [runners.kubernetes.volumes]
+      # На каждом хосте k8s присутствовали корпоративные сертификаты. Это --
+      # один из многих, хотя и довольно костыльный способ доставить их в
+      # пользовательские пайплайны без лишних телодвижений с их стороны.
+      [[runners.kubernetes.volumes.host_path]]
+        host_path = "/usr/local/share/ca-certificates"
+        mount_path = "/usr/local/share/ca-certificates"
+        name = "certs-volume"
+        read_only = true
+
+[[runners]]
+  executor = "shell"
+  name = "Local shell runner"
+  url = "https://gitlab.slurm.io"
+  token = "some_token"
+  shell = "bash"
+
+[[runners]]
+  executor = "ssh"
+  name = "SSH runner"
+  url = "https://gitlab.slurm.io"
+  token = "some_other_token"
+  [runners.ssh]
+    host = "remotehost.company.ru"
+    port = "22"
+    user = "runner_user"
+    # password = "my_pa$$w0rd"
+    identity_file = "/home/runner_user/.ssh/id_rsa"
+
+[[runners]]
+  executor = "docker"
+  name = "Docker runner"
+  url = "https://gitlab.slurm.io"
+  token = "docker_runner_token"
+  # Локальный кэш можно использовать с экзекьюторами "shell", "ssh", "docker".
+  cache_dir = "/path/to/local/cache"
+  [runners.docker]
+    # В дефолтном случае на хосте, на котором запущен gitlab-runner, должен
+    # присутствовать и докер, а если gitlab-runner сам запущен в контейнере,
+    # то сокет должен быть примонтирован к этому контейнеру (см. лекцию).
+    # host = "unix:///var/run/docker.sock" # дефолтное значение
+    # host = "tcp://docker.company.ru:2375" # возможная альтернатива
+    image = "bash:4.4"
+
+    # Если используется локальный кеш и docker, то для его сохранности после
+    # завершения пайплайна, вышеназванный cache_dir должен быть директорией
+    # примонтированной с хоста. В данном примере директория на хосте с
+    # произвольным названием (/path/to/cache/on_server) монтируется в контейнер
+    # как /path/to/local/cache, т.е. совпадает с тем, что написано в cache_dir.
+    #
+    # Второй элемент списка - способ обойтись без использования docker-in-
+    # docker. Вместо этого в запускаемые контейнеры монтируется сокет докера
+    # и им больше не требуется привилигерованный режим, но доступ к хостовому
+    # сокету докера эквивалентен рут-доступу на этом хосте.
+    volumes = ["/path/to/cache/on_server:/path/to/local/cache","/var/run/docker.sock:/var/run/docker.sock"]

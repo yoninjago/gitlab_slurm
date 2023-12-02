@@ -1,0 +1,50 @@
+.build_docker_image:
+  image: registry.slurm.io/edu/ci-cd/cicd/kaniko:latest
+  services: []
+  variables:
+    DOCKER_CONTEXT: ./
+    DOCKER_DOCKERFILE: ./Dockerfile
+    DOCKER_REGISTRY_MIRROR: mirror.gcr.io
+    DOCKER_REGISTRY_IMAGE: ${CI_REGISTRY_IMAGE}
+  script:
+  - |-
+      echo "Constructing build-args..."
+      for arg in ${!DOCKER_BUILD_ARG_*}
+      do
+        echo "${arg} is ${!arg}"
+        DOCKER_PARAMS="${DOCKER_PARAMS} --build-arg=${!arg}"
+      done
+  - "[ -n ${DOCKER_RELEASE_TAG:=${CI_COMMIT_TAG:-${CI_COMMIT_SHORT_SHA}}} ] ;
+      echo DOCKER_RELEASE_TAG=$DOCKER_RELEASE_TAG"
+  - |-
+      if [[ ! -v DOCKER_IMAGE_LATEST ]]
+      then
+        DOCKER_IMAGE_LATEST=${DOCKER_REGISTRY_IMAGE}${DOCKER_REGISTRY_SUBPATH}:latest
+        echo DOCKER_IMAGE_LATEST=$DOCKER_IMAGE_LATEST
+        DOCKER_PARAMS="${DOCKER_PARAMS} --destination=${DOCKER_IMAGE_LATEST}"
+      elif [[ -n ${DOCKER_IMAGE_LATEST} ]]
+      then
+        DOCKER_PARAMS="${DOCKER_PARAMS} --destination=${DOCKER_IMAGE_LATEST}"
+        echo "Overriding DOCKER_IMAGE_LATEST destination to ${DOCKER_IMAGE_LATEST}"
+      else
+        echo "Not pushing latest tag"
+      fi
+  - |-
+      if [[ ! -v DOCKER_IMAGE_RELEASE ]]
+      then
+        DOCKER_IMAGE_RELEASE=${DOCKER_REGISTRY_IMAGE}${DOCKER_REGISTRY_SUBPATH}:${DOCKER_RELEASE_TAG}
+        echo DOCKER_IMAGE_RELEASE=$DOCKER_IMAGE_RELEASE
+        DOCKER_PARAMS="${DOCKER_PARAMS} --destination=${DOCKER_IMAGE_RELEASE}"
+      elif [[ -n ${DOCKER_IMAGE_RELEASE} ]]
+      then
+        DOCKER_PARAMS="${DOCKER_PARAMS} --destination=${DOCKER_IMAGE_RELEASE}"
+        echo "Overriding DOCKER_IMAGE_RELEASE destination to ${DOCKER_IMAGE_RELEASE}"
+      else
+        echo "Not pushing release tag"
+      fi
+  - echo DOCKER_PARAMS are ; echo ${DOCKER_PARAMS} ; echo interpolated ; echo ${DOCKER_PARAMS@P}
+  - /kaniko/executor
+      --context ${DOCKER_CONTEXT}
+      --dockerfile ${DOCKER_DOCKERFILE}
+      ${DOCKER_PARAMS@P}
+      --registry-mirror ${DOCKER_REGISTRY_MIRROR}

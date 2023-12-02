@@ -1,0 +1,196 @@
+---
+
+workflow:
+  rules:
+    # For merge requests created to `develop` branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+      variables:
+        IMAGE_TAG: 'dev-pr-${CI_MERGE_REQUEST_IID}'
+        HELM_DIFF: "True"
+    # For merge requests created to `main` branch from `develop` branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "develop"'
+      variables:
+        IMAGE_TAG: 'main-pr-${CI_MERGE_REQUEST_IID}'
+        HELM_DIFF: "True"
+    # For `main` and `develop` branch, create a pipeline (this includes on schedules, pushes, merges, etc.).
+    - if: '$CI_COMMIT_BRANCH =~ /^main|develop$/'
+      variables:
+        IMAGE_TAG: '${CI_COMMIT_BRANCH}-${CI_PIPELINE_IID}'
+        HELM_APPLY: "True"
+    # For tags starting with v prefix, create a pipeline
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      variables:
+        IMAGE_TAG: '${CI_COMMIT_TAG}'
+        HELM_APPLY: "True"
+    # For manual runs, create a pipeline
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      variables:
+        IMAGE_TAG: 'manual-${CI_COMMIT_BRANCH}-${CI_PIPELINE_IID}'
+        HELM_APPLY: "True"
+
+image: python:3.9
+stages:
+  - lint
+  - build
+  - test
+  - deploy
+  - validate
+  - release
+
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Secret-Detection.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
+.lint:
+  stage: lint
+  before_script: &installDev
+    - source venv/bin/activate || (python3 -m venv venv && source venv/bin/activate)
+    - pip3 install --upgrade -r requirements-dev.txt
+  cache: &cache
+    - key: python
+      paths:
+        - venv/
+  rules:
+    # We run lints for MRs only
+    - if: '$CI_MERGE_REQUEST_IID'
+
+Lint:Pylint:
+  extends: .lint
+  script: find {tests,application} -type f -name "*.py" | xargs pylint
+
+Lint:Black:
+  extends: .lint
+  script: black {tests,application}/**/*.py -v --check --diff
+
+Build:Docker:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  script:
+    - mkdir -p /kaniko/.docker
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"$(printf "%s:%s" "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')\"}}}" > /kaniko/.docker/config.json
+    - /kaniko/executor --context "${CI_PROJECT_DIR}" --destination "${CI_REGISTRY_IMAGE}:${IMAGE_TAG}"
+
+.test:
+  stage: test
+  before_script: *installDev
+  cache: *cache
+
+Test:Unit:
+  extends: .test
+  script: python3 -m pytest tests/unit
+  rules: &develop
+    # We run unit tests for MRs created against the develop branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    # And for develop branch
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+Test:Integration:
+  extends: .test
+  script: python3 -m pytest tests/integration
+  rules: &main
+    # We run unit tests for MRs created against the main branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    # And for main branch
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# Here we customise some security tests conditions
+secret_detection:
+  rules:
+    - *develop
+    - *main
+
+bandit-sast:
+  rules: *develop
+
+container_scanning:
+  variables:
+    DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}:${IMAGE_TAG}
+  rules: *main
+
+.deploy:
+  stage: deploy
+  image: jshimko/kube-tools-aws:3.8.1
+  variables:
+    HELM_SET: --set image.tag=${IMAGE_TAG}
+  script:
+    - helm plugin install https://github.com/databus23/helm-diff
+    - aws eks update-kubeconfig --name gitlab-ci-course
+    - kubectl version
+    - if [[ -n "${HELM_DIFF}" ]] || [[ -n "${HELM_APPLY}" ]]; then helm diff upgrade --allow-unreleased ${HELM_SET} app-${CI_ENVIRONMENT_NAME} helm/application; else echo "Skipping diff"; fi
+    - if [[ -n "${HELM_APPLY}" ]]; then helm upgrade --wait -i ${HELM_SET} app-${CI_ENVIRONMENT_NAME} helm/application; else echo "Skipping apply"; fi
+
+Deploy:Dev:
+  extends: .deploy
+  variables: &devVars
+    ENDPOINT: http://a1797b841555d46b5a435c35be5d2783-1297099708.eu-central-1.elb.amazonaws.com
+  environment:
+    name: development
+    url: $ENDPOINT
+  rules:
+    # We show dry-run only for MRs  to `develop`
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    # We deploy dev env from develop branch only
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+Deploy:Staging:
+  extends: .deploy
+  variables: &stgVars
+    ENDPOINT: http://a349ee9768e284bbabe6128463d6783c-1720579057.eu-central-1.elb.amazonaws.com
+  environment:
+    name: staging
+    url: $ENDPOINT
+  rules:
+    # We show dry-run only for MRs to `main` from `develop`
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "develop"'
+    # We deploy staging env from main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Deploy:Production:
+  extends: .deploy
+  variables: &prodVars
+    ENDPOINT: http://a2d5dd41c75814b21a612006828f4f8e-1077499284.eu-central-1.elb.amazonaws.com
+    ALLOWED_USERS_LIST: >
+      s040941 - Alexander Dovnar
+  before_script:
+    - (echo ${ALLOWED_USERS_LIST} | grep ${GITLAB_USER_LOGIN}) && echo "Users is allowed to proceed" || (echo "No permissions"; exit 1)
+  environment:
+    name: production
+    url: $ENDPOINT
+  rules:
+    # We deploy prod env from tags only
+    - if: '$CI_COMMIT_TAG'
+      when: manual
+
+Validate:Smoke:
+  stage: validate
+  script: curl -I -v ${ENDPOINT}
+  rules:
+    # We run smoke tests after deployments
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      variables: *devVars
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      variables: *stgVars
+    - if: '$CI_COMMIT_TAG'
+      variables: *prodVars
+
+Validate:E2E:
+  stage: validate
+  script:
+    - 'curl ${ENDPOINT} | grep "Current time"'
+    - 'curl ${ENDPOINT}/version | grep "Application version ${IMAGE_TAG}"'
+    - 'curl ${ENDPOINT}/version | grep "Running from CI: False"'
+  variables: *stgVars
+  rules:
+    # We run e2e tests for main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Release:Tag:
+  stage: release
+  image: registry.gitlab.com/juhani/go-semrel-gitlab:v0.21.1
+  script: release --bump-patch tag
+  rules:
+    # We run release creation from main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'

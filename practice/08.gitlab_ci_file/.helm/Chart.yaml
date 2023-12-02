@@ -1,0 +1,9 @@
+description: Generic Helm chart for Kubernetes.
+home: https://slurm.io/
+maintainers:
+- email: a.shvalov@southbridge.ru
+  name: Aleksandr Shvalov
+name: app
+sources:
+- https://gitlab.slurm.io/edu/ci-cd/cicd-app
+version: 1.0.0

@@ -1,0 +1,25 @@
+# This is a YAML-formatted file.
+
+image: registry.slurm.io/edu/cicd-app/
+imageTag: master.1
+imagePullSecret: cicd-gitlab-registry
+
+# Resources for app. Limits is the maximum number of resources that app cas use.
+# And requests is resources that will be granted to the app at start time.
+replicas: 2
+
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+service:
+  app_port: 8080
+  port: 80
+
+ingress:
+  host: app.s<номер своего логина>.edu.slurm.io

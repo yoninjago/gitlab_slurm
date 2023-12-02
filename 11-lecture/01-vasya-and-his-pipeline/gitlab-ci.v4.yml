@@ -1,0 +1,11 @@
+include:
+- local: /docker.v2.yml
+
+stages:
+# - other stages
+- docker
+# - deploy manifests
+
+Build docker image:
+  stage: docker
+  extends: .build_docker_image

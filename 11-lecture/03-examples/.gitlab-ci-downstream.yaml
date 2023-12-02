@@ -1,0 +1,33 @@
+---
+stages:
+  - dependencies
+  - build
+
+variables:
+  PRODUCT: demo product
+
+Application 1:Dependency:
+  stage: dependencies
+  trigger: g040941/ci-demo
+
+Application 1:Include:
+  stage: build
+  variables:
+    APPLICATION: application 1
+  trigger:
+    include: downstream-build.yaml
+    strategy: depend
+    forward:
+      pipeline_variables: true
+      yaml_variables: true
+
+Application 2:Include:
+  stage: build
+  variables:
+    APPLICATION: application 2
+  trigger:
+    include: downstream-build.yaml
+    strategy: depend
+    forward:
+      pipeline_variables: true
+      yaml_variables: true

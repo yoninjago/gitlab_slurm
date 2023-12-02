@@ -1,0 +1,22 @@
+---
+
+stages:
+  - lint
+  - build
+  - test
+
+variables:
+  PRODUCT: ""
+  APPLICATION: ""
+
+Lint:
+  stage: lint
+  script: echo "linting ${APPLICATION} (${PRODUCT})"
+
+Build:
+  stage: build
+  script: echo "Building ${APPLICATION} (${PRODUCT})"
+
+Test:
+  stage: test
+  script: echo "e2e test of ${APPLICATION} (${PRODUCT})"

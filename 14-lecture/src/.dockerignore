@@ -1,0 +1,11 @@
+# Ignore dev items
+venv/
+.pylintrc
+requirements-dev.txt
+# Ignore other files
+.gitignore
+.gitlab-ci.yml
+Dockerfile
+.dockerignore
+README.md
+helm

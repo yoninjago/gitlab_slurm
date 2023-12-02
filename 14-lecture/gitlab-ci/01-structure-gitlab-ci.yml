@@ -1,0 +1,120 @@
+---
+
+workflow:
+  rules:
+    # For merge requests created to `develop` branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    # For merge requests created to `main` branch from `develop` branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME == "develop"'
+    # For `main` and `develop` branch, create a pipeline (this includes on schedules, pushes, merges, etc.).
+    - if: '$CI_COMMIT_BRANCH =~ /^main|develop$/'
+    # For tags, create a pipeline.
+    - if: '$CI_COMMIT_TAG'
+    # For manual runs, create a pipeline
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+
+stages:
+  - lint
+  - build
+  - test
+  - deploy
+  - validate
+  - release
+
+.lint:
+  stage: lint
+  rules:
+    # We run lints for MRs only
+    - if: '$CI_MERGE_REQUEST_IID'
+
+Lint:Pylint:
+  extends: .lint
+  script: find {tests,application} -type f -name "*.py" | xargs pylint
+
+Lint:Black:
+  extends: .lint
+  script: black {tests,application}/**/*.py -v --check --diff
+
+Build:Docker:
+  stage: build
+  script: echo "docker build"
+
+Test:Unit:
+  stage: test
+  script: echo "Unit tests"
+  rules: &develop
+    # We run unit tests for MRs created against the develop branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"'
+    # And for develop branch
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+Test:Integration:
+  stage: test
+  script: echo "Unit tests"
+  rules: &main
+    # We run unit tests for MRs created against the main branch
+    - if: '$CI_MERGE_REQUEST_IID && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"'
+    # And for main branch
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Test:SecurityBasic:
+  stage: test
+  script: echo "Some basic security checks"
+  rules: *develop
+
+Test:SecurityAdvanced:
+  stage: test
+  script: echo "Some advanced security checks"
+  rules: *main
+
+Deploy:Dev:
+  stage: deploy
+  environment:
+    name: development
+    url: https://dev.example.com
+  script: echo "deploy to ${CI_ENVIRONMENT_NAME}"
+  rules:
+    # We deploy dev env from develop branch only
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+
+Deploy:Staging:
+  stage: deploy
+  environment:
+    name: staging
+    url: https://staging.example.com
+  script: echo "deploy to ${CI_ENVIRONMENT_NAME}"
+  rules:
+    # We deploy staging env from main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Deploy:Production:
+  stage: deploy
+  environment:
+    name: production
+    url: https://example.com
+  script: echo "deploy to ${CI_ENVIRONMENT_NAME}"
+  rules:
+    # We deploy prod env from tags only
+    - if: '$CI_COMMIT_TAG == "main"'
+      when: manual
+
+Validate:Smoke:
+  stage: validate
+  script: echo "e2e tests"
+  rules:
+    # We run smoke tests after deployments
+    - if: '$CI_COMMIT_BRANCH =~ /^main|develop$/'
+
+Validate:E2E:
+  stage: validate
+  script: echo "e2e tests"
+  rules:
+    # We run e2e tests for main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+Release:Tag:
+  stage: release
+  script: echo "release"
+  rules:
+    # We run release creation from main branch only
+    - if: '$CI_COMMIT_BRANCH == "main"'

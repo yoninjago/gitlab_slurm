@@ -1,0 +1,32 @@
+---
+stages:
+  - lint
+  - test
+
+Lint:Lint1:
+  stage: lint
+  before_script:
+    - echo "Some dependency installation"
+    - echo "Some variables preparation"
+    - sleep 5s
+  script: echo "lint1"
+
+.lint:
+  stage: lint
+  before_script:
+    - echo "Some dependency installation"
+    - echo "Some variables preparation"
+    - sleep 5s
+
+Lint:Lint2:
+  extends: .lint
+  script:
+    - echo "lint2"
+  after_script: &after
+    - echo "Some artifacts uploading"
+    - echo "Some notication"
+
+Lint:Lint3:
+  extends: .lint
+  script: echo "lint3"
+  after_script: *after

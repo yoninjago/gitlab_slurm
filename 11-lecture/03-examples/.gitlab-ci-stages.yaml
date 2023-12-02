@@ -1,0 +1,30 @@
+---
+stages:
+  - lint
+  - build
+  - test
+
+Lint:Example:
+  stage: lint
+  script: echo "linting"; sleep 10s;
+
+Build:Web:
+  stage: build
+  script: echo "Web build"; sleep 10s;
+
+Build:Android:
+  stage: build
+  script: echo "Android build"; sleep 60s;
+
+Build:iOS:
+  stage: build
+  script: echo "iOS build"; sleep 60s;
+
+Test:Web:
+  stage: test
+  needs: ["Build:Web"]
+  script: echo "Test web"; sleep 10s;
+
+Test:E2E:
+  stage: test
+  script: echo "e2e test"; sleep 10s;
